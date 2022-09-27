@@ -1,0 +1,178 @@
+
+R Notebook
+
+library(edgeR)
+
+## Loading required package: limma
+
+annot<-read.table("annot.csv", header = TRUE, row.names = 1) 
+cond<-read.table("conditions.csv", header = TRUE, row.names = 1)
+data<-read.table("data.csv", header = TRUE, row.names = 1) 
+
+REORDER: We want the column and row of data to be in the same order of row of condition and the row of annotation respectively: To do so,two vectors (order and order1) with the names of the columns and rows of data have been created. cond and annot dataframe are then reordered using the vectors by row
+
+order<-colnames(data)   
+cond<-cond[order,]       
+order1<-rownames(data)   
+annot<-annot[order1,]
+
+DATA FILTERING: In order to keep only genes that show at least 10 reads in 1 replicate: A matrix of logical value T,F (EXP) has been created, than the function apply is applied, obtaining on vector (NumExp) the sum by row, cosidering T=1 and F=0. We create a new dataframe based on data imposing as codition the row (NumExp>0) In this way only genes presenting by a sum>0 are kept, the same operation has to be applied to annotation
+
+EXP=data>=10                     
+NumExp=apply(EXP,1,sum)
+FiltCounts<-data[NumExp>0,]
+FiltAnnotation<-annot[NumExp>0,] 
+
+DGE LIST: DGEList(function in EdgeR) and data normalization using calcNormFactors (EdgeR function)
+
+dge_list<-DGEList(counts = FiltCounts, gene =FiltAnnotation, group = cond$tissue)
+dge_list<-calcNormFactors(dge_list) 
+
+MDS PLOT: The plot show the six tissue clusterization, Substantia nigra and Frontal Cortex has been chosen for further analysis the because of the wide distance between the genes of the two tissue groups
+
+plotMDS(dge_list,col=rep(c("red","green","blue","yellow","black","purple"),6),labels = cond$tissue, cex = 0.6) 
+
+ESTIMATE DISPERSION & EXACT TEST: Substantia nigra and Frontal Cortex has been chosen from the previeous graph to perform the a differential expression analysis through exactTest function. To do so the estimate dispersion is required
+
+dge_list<-estimateDisp(dge_list)    
+
+## Using classic mode.
+
+deTg<-exactTest(dge_list, pair = c("Substantia nigra", "Frontal Cortex (BA9)") , dispersion = "tagwise")
+
+TOPTAGS: Estraction of DE genes from a test sorted by p.value
+
+Tg<-topTags(deTg,n=nrow(deTg),adjust.method = "BH", sort.by = "PValue", p.value = 1) 
+
+DIFFERENTIAL EXPRESSED GENES: Creation of four different subclasses
+
+DE_UP_Tg<-Tg$table[(Tg$table[[6]]<=0.01 & Tg$table[[3]]>0),]                   
+DE_DOWN_Tg <-Tg$table[(Tg$table[[6]]<=0.01 & Tg$table[[3]]<0),]          
+notDE_UP_Tg<- Tg$table[(Tg$table[[6]]>0.01 & Tg$table[[3]]>0),]          
+notDE_DOWN_Tg <- Tg$table[(Tg$table[[6]]>0.01 & Tg$table[[3]]<0),]       
+
+BOXPLOT: notch display the confidence interval around the median, in other words no overlaps between thw boxes is a strong evidence that the medians differs
+
+listabox <- list(DE_UP_Tg$logFC, DE_DOWN_Tg$logFC, notDE_UP_Tg$logFC, notDE_DOWN_Tg$logFC)
+boxplot(listabox,col= c("grey", "white", "brown", "orange") ,main = "Differential expressed genes", notch = T, outline = F, ylab= "logFC",xlab = "DE groups",names = c("DE_UP", "DE_DOWN", "notDE_UP", "notDE_DOWN"))
+
+########################SECOND PART################################# GENE ID BASED ON TISSUE SELECTION
+
+SN<-dge_list$samples$group == "Substantia nigra"        
+FC<-dge_list$samples$group ==  "Frontal Cortex (BA9)"
+conditions2<-cond[SN|FC,]      
+order2<-row.names(conditions2)  
+Cond2Counts<-FiltCounts[,order2]
+
+PCA
+
+FiltCond2CountsPseudo<-Cond2Counts+0.01       
+logFiltCond2Counts=log(FiltCond2CountsPseudo)
+PCA<-prcomp(t(logFiltCond2Counts))
+
+PLOT PCA:
+
+par(mfrow=c(1,2))   
+
+plot(PCA$x,pch=18,col=rep(c("light blue","pink"), table(conditions2$sex)),cex=3,main=" S. Nigra-F.Cortex PCA
+     tissue id displayed")
+text(PCA$x, labels = conditions2$id, cex = 0.70)
+
+plot(PCA$x,pch=18,col=rep(c("light blue","pink"), table(conditions2$sex)),cex=3,main="S. Nigra-F.Cortex PCA
+     tissue name displayed")  
+text(PCA$x, labels = conditions2$tissue, cex = 0.70)
+
+DATA FILTERING2 2 subsets of filtered data containing the sample condition of the specific tissues are selected. Practically we subset six columns
+
+count_SN<-Cond2Counts[,conditions2$tissue == "Substantia nigra"]    
+count_FC<-Cond2Counts[,conditions2$tissue == "Frontal Cortex (BA9)"]
+
+10 READS IN AT LEAST TWO REPLICATES Substatia Nigra
+
+EXP_SN=count_SN>=10                         
+NumExp_SN=apply(EXP_SN,1,sum)
+Filtcount_SN<-count_SN[NumExp_SN>1,]
+
+FiltAnn_SN<-FiltAnnotation[rownames(Filtcount_SN),]
+FiltCondition_SN<-conditions2[colnames(Filtcount_SN),]
+
+10 READS IN AT LEAST TWO REPLICATES Frontal Cortex
+
+EXP_FC=count_FC>=10
+NumExp_FC=apply(EXP_FC,1,sum)
+Filtcount_FC<-count_FC[NumExp_FC>1,]
+
+FiltAnn_FC<-FiltAnnotation[rownames(Filtcount_FC),]
+FiltCondition_FC<-conditions2[colnames(Filtcount_FC),]
+
+DGE LIST SUB_NIG
+
+dge_list_SN<-DGEList(Filtcount_SN, genes = FiltAnn_SN, samples = FiltCondition_SN, group = FiltCondition_SN$sex, remove.zeros = T )
+
+DGE LIST Frontal Cortex
+
+dge_list_FC<-DGEList(Filtcount_FC, genes = FiltAnn_FC, samples = FiltCondition_FC, group = FiltCondition_FC$sex, remove.zeros = T )
+
+DE EXACT TEST Substantia Nigra
+
+dge_list_SN<-estimateDisp(dge_list_SN)
+
+## Using classic mode.
+
+SexTg_SN<-exactTest(dge_list_SN, pair = c("1", "2") , dispersion = "tagwise")
+
+DE EXACT TEST Frontal Cortex
+
+dge_list_FC<-estimateDisp(dge_list_FC)
+
+## Using classic mode.
+
+SexTg_FC<-exactTest(dge_list_FC, pair = c("1","2") , dispersion = "tagwise")
+
+#“TAGWISE”
+
+Tg_SN<-topTags(SexTg_SN,n=nrow(SexTg_SN),adjust.method = "BH", sort.by = "PValue", p.value = 1)  
+Tg_FC<-topTags(SexTg_FC,n=nrow(SexTg_FC),adjust.method = "BH", sort.by = "PValue", p.value = 1)
+
+#“FDR Substantia Nigra”
+
+DE_Tg_SN<-Tg_SN$table[Tg_SN$table[[6]]<=0.05,]  
+
+##“FDR Frontal Cortex”
+
+DE_Tg_FC<-Tg_FC$table[Tg_FC$table[[6]]<=0.05,]
+
+#“VENN1”
+
+SN1<-row.names(DE_Tg_SN)
+FC1<-row.names(DE_Tg_FC)
+DElist<-list(SN1,FC1)
+library(VennDiagram)
+
+## Loading required package: grid
+
+## Loading required package: futile.logger
+
+venn.diagram(DElist,category.names = c("Substantia Nigra","Frontal Cortex"),filename = "Venn1.png",imagetype = "png",main="Venn Diagram of sex specific genes according to edgeR",col=c("blue","red"))
+
+## [1] 1
+
+#“VENN2 #”testing different DE find in common part”
+
+DU<-row.names(DE_UP_Tg)       
+DD<-row.names(DE_DOWN_Tg)     
+nDU<-row.names(notDE_UP_Tg)      
+nDD<-row.names(notDE_DOWN_Tg)
+
+DElist2<-list(DU, DD, nDU, nDD,SN1)
+venn.diagram(DElist2,category.names = c("DU", "DD", "nDU", "nDD", "SN1"),filename = "Venn2.png",imagetype = "png",main="DE genes vs Sex Specific SN Genes",col=c("orange", "yellow", "purple", "green" ,"blue"))
+
+## [1] 1
+
+#“VENN3”
+
+DElist3<-list(DU,DD,SN1,FC1)
+venn.diagram(DElist3,category.names = c("DU", "DD","SN1", "FC1"),filename = "Venn3.png",imagetype = "png",main="DE vs Sex Specific SN and FC",col=c("orange", "yellow", "purple", "green"))
+
+## [1] 1
+
